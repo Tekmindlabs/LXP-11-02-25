@@ -1,4 +1,4 @@
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, Prisma } from "@prisma/client";
 import type { AcademicTerm, ClassGroupTermSettings } from "@/types/terms";
 import { NotificationService } from "./NotificationService";
 
@@ -11,6 +11,21 @@ interface ProgramTermUpdate {
 	lastUpdated?: Date;
 }
 
+type SerializedTerm = {
+	[key: string]: unknown;
+	startDate: string;
+	endDate: string;
+	name: string;
+	weight?: number;
+}
+
+type SerializedSettings = {
+	[key: string]: unknown;
+	startDate: string;
+	endDate: string;
+	terms: SerializedTerm[];
+}
+
 export class TermManagementService {
 	private notificationService: NotificationService;
 
@@ -18,53 +33,87 @@ export class TermManagementService {
 		this.notificationService = new NotificationService(db);
 	}
 
+	private serializeSettings(updates: ProgramTermUpdate): Prisma.JsonObject {
+		return {
+			startDate: updates.academicTerms[0]?.startDate.toISOString(),
+			endDate: updates.academicTerms[updates.academicTerms.length - 1]?.endDate.toISOString(),
+			terms: updates.academicTerms.map(term => ({
+				name: term.name,
+				startDate: term.startDate.toISOString(),
+				endDate: term.endDate.toISOString(),
+				weight: 100
+			}))
+		} as Prisma.JsonObject;
+	}
+
 	async cascadeTermUpdates(programId: string, updates: ProgramTermUpdate, systemUserId: string) {
 		try {
-			// 1. Update program terms
-			const programTerms = await this.db.programTermStructure.update({
+			// 1. Find the program term structure first
+			const existingProgramTerm = await this.db.programTermStructure.findFirst({
 				where: { programId },
-				data: updates
+				include: { academicTerms: true }
 			});
 
-			// 2. Get all related class groups
+			if (!existingProgramTerm) {
+				throw new Error(`No program term structure found for program ${programId}`);
+			}
+
+			// 2. Update program terms
+			const programTerms = await this.db.programTermStructure.update({
+				where: { id: existingProgramTerm.id },
+				data: {
+					academicTerms: {
+						updateMany: updates.academicTerms.map((term, index) => ({
+							where: { id: existingProgramTerm.academicTerms[index]?.id },
+							data: {
+								name: term.name,
+								startDate: term.startDate,
+								endDate: term.endDate,
+								updatedAt: new Date()
+							}
+						}))
+					},
+					updatedAt: new Date()
+				},
+				include: {
+					academicTerms: true
+				}
+			});
+
+			// 3. Get all related class groups
 			const classGroups = await this.db.classGroup.findMany({
 				where: { programId }
 			});
 
-			// 3. Cascade updates to class groups and their classes
+			// 4. Cascade updates to class groups
 			for (const group of classGroups) {
-				// Update class group terms
-				await this.db.classGroupTermSettings.update({
-					where: { classGroupId: group.id },
-					data: {
-						academicTerms: updates.academicTerms,
-						lastUpdated: new Date()
+				const termSettings = await this.db.classGroupTermSettings.findFirst({
+					where: {
+						classGroupId: group.id,
+						programTermId: programTerms.id
 					}
 				});
 
-				// Get and update related classes
-				const classes = await this.db.class.findMany({
-					where: { classGroupId: group.id }
-				});
+				const serializedSettings = this.serializeSettings(updates);
 
-				await Promise.all(classes.map(async (classItem) => {
-					await this.db.classTermSettings.update({
-						where: { classId: classItem.id },
-						data: {
-							academicTerms: updates.academicTerms,
-							lastUpdated: new Date()
-						}
-					});
 
-					// Create notification for class update
-					await this.notificationService.createUpdateNotification(
-						classItem.id,
-						'TERM_UPDATE',
-						{ updatedAt: new Date() },
-						systemUserId,
-						'Class Term Settings Updated'
-					);
-				}));
+				if (termSettings) {
+				  await this.db.classGroupTermSettings.update({
+					where: { id: termSettings.id },
+					data: {
+					  customSettings: serializedSettings,
+					  updatedAt: new Date()
+					}
+				  });
+				} else {
+				  await this.db.classGroupTermSettings.create({
+					data: {
+					  classGroup: { connect: { id: group.id } },
+					  programTerm: { connect: { id: programTerms.id } },
+					  customSettings: serializedSettings
+					}
+				  });
+				}
 
 				// Create notification for class group update
 				await this.notificationService.createUpdateNotification(
@@ -83,60 +132,7 @@ export class TermManagementService {
 		}
 	}
 
-	async createProgramTerms(programId: string, academicYearId: string, terms: Omit<AcademicTerm, 'id'>[]) {
-		const programTerms = await this.db.programTermStructure.create({
-			data: {
-				program: { connect: { id: programId } },
-				academicYear: { connect: { id: academicYearId } },
-				academicTerms: {
-					create: terms.map(term => ({
-						name: term.name,
-						startDate: term.startDate,
-						endDate: term.endDate,
-						type: term.type,
-						calendarTerm: term.calendarTermId ? {
-							connect: { id: term.calendarTermId }
-						} : undefined,
-						assessmentPeriods: {
-							create: term.assessmentPeriods.map(ap => ({
-								name: ap.name,
-								startDate: ap.startDate,
-								endDate: ap.endDate,
-								weight: ap.weight
-							}))
-						}
-					}))
-				}
-			},
-			include: {
-				academicTerms: {
-					include: {
-						assessmentPeriods: true,
-						calendarTerm: true
-					}
-				}
-			}
-		});
-
-		const classGroups = await this.db.classGroup.findMany({
-			where: { programId }
-		});
-
-		await Promise.all(
-			classGroups.map(group =>
-				this.db.classGroupTermSettings.create({
-					data: {
-						classGroup: { connect: { id: group.id } },
-						programTerm: { connect: { id: programTerms.id } }
-					}
-				})
-			)
-		);
-
-		return programTerms;
-	}
-
-	async getClassGroupTerms(classGroupId: string) {
+	async getClassGroupTerms(classGroupId: string): Promise<AcademicTerm[]> {
 		const termSettings = await this.db.classGroupTermSettings.findFirst({
 			where: { classGroupId },
 			include: {
@@ -144,8 +140,7 @@ export class TermManagementService {
 					include: {
 						academicTerms: {
 							include: {
-								assessmentPeriods: true,
-								calendarTerm: true
+								assessmentPeriods: true
 							}
 						}
 					}
@@ -157,55 +152,67 @@ export class TermManagementService {
 			throw new Error("Term settings not found for class group");
 		}
 
-		const customSettings = termSettings.customSettings ? 
-			JSON.parse(termSettings.customSettings as string) as ClassGroupTermSettings['customSettings'] : 
-			undefined;
+		const baseTerms: AcademicTerm[] = termSettings.programTerm.academicTerms.map(term => ({
+			id: term.id,
+			name: term.name,
+			type: 'TERM' as const,
+			startDate: new Date(term.startDate),
+			endDate: new Date(term.endDate),
+			assessmentPeriods: term.assessmentPeriods.map(ap => ({
 
-		return this.mergeTermSettings(
-			termSettings.programTerm.academicTerms as unknown as AcademicTerm[],
-			customSettings
-		);
+				id: ap.id,
+				name: ap.name,
+				startDate: ap.startDate,
+				endDate: ap.endDate,
+				weight: ap.weight
+			}))
+		}));
+
+		const settings = termSettings.customSettings as Prisma.JsonObject | null;
+		if (!settings?.terms) return baseTerms;
+
+		return baseTerms.map((term, index) => {
+			const customTerm = (settings.terms as SerializedTerm[])[index];
+			if (!customTerm) return term;
+
+			return {
+				...term,
+				startDate: new Date(customTerm.startDate),
+				endDate: new Date(customTerm.endDate),
+				name: customTerm.name
+			};
+		});
 	}
+
 
 	async customizeClassGroupTerm(
 		classGroupId: string,
 		termId: string,
 		customSettings: NonNullable<ClassGroupTermSettings['customSettings']>
 	) {
+		const serializedSettings: Prisma.JsonObject = {
+			startDate: customSettings.startDate?.toISOString() ?? new Date().toISOString(),
+			endDate: customSettings.endDate?.toISOString() ?? new Date().toISOString(),
+			terms: customSettings.assessmentPeriods?.map(ap => ({
+				name: ap.name,
+				startDate: ap.startDate.toISOString(),
+				endDate: ap.endDate.toISOString(),
+				weight: ap.weight
+			})) ?? []
+		} as Prisma.JsonObject;
+
+
 		return this.db.classGroupTermSettings.update({
 			where: {
 				id: termId,
 				classGroupId
 			},
 			data: {
-				customSettings: JSON.stringify({
-					startDate: customSettings.startDate?.toISOString(),
-					endDate: customSettings.endDate?.toISOString(),
-					assessmentPeriods: customSettings.assessmentPeriods?.map(ap => ({
-						...ap,
-						startDate: ap.startDate.toISOString(),
-						endDate: ap.endDate.toISOString()
-					}))
-				})
+				customSettings: serializedSettings
 			}
 		});
 	}
 
-	private mergeTermSettings(
-		baseTerms: AcademicTerm[],
-		customSettings?: ClassGroupTermSettings['customSettings']
-	): AcademicTerm[] {
-		if (!customSettings) return baseTerms;
 
-		return baseTerms.map(term => ({
-			...term,
-			startDate: customSettings.startDate ? new Date(customSettings.startDate) : term.startDate,
-			endDate: customSettings.endDate ? new Date(customSettings.endDate) : term.endDate,
-			assessmentPeriods: customSettings.assessmentPeriods?.map(ap => ({
-				...ap,
-				startDate: new Date(ap.startDate),
-				endDate: new Date(ap.endDate)
-			})) || term.assessmentPeriods
-		}));
-	}
+
 }

@@ -1,4 +1,4 @@
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, Notification } from "@prisma/client";
 
 export type NotificationType = 
 	| 'TERM_UPDATE' 
@@ -18,17 +18,16 @@ export class NotificationService {
 		type: NotificationType,
 		details: Record<string, any>,
 		senderId: string,
-		title?: string
+		title: string
 	) {
 		return await this.db.notification.create({
 			data: {
 				type,
 				entityId,
 				details: JSON.stringify(details),
-				status: 'UNREAD',
 				title,
 				sender: { connect: { id: senderId } },
-				createdAt: new Date()
+				status: 'UNREAD'
 			}
 		});
 	}
@@ -37,7 +36,6 @@ export class NotificationService {
 		return await this.db.notification.update({
 			where: { id: notificationId },
 			data: { 
-				status: 'READ',
 				readAt: new Date()
 			}
 		});
@@ -47,8 +45,7 @@ export class NotificationService {
 		return await this.db.notification.findMany({
 			where: {
 				OR: [
-					{ recipients: { some: { recipientId: userId, read: false } } },
-					{ targetUsers: { some: { id: userId } } }
+					{ recipients: { some: { recipientId: userId, read: false } } }
 				],
 				status: 'UNREAD'
 			},

@@ -706,9 +706,10 @@ export const programRouter = createTRPCRouter({
       const errorRecovery = new ErrorRecoveryService(ctx.prisma);
 
       try {
-      const result = await termService.cascadeTermUpdates(
+        const result = await termService.cascadeTermUpdates(
         input.programId,
-        input.updates
+        input.updates,
+        ctx.session.user.id
       );
 
       await changeTracker.trackChange(
@@ -742,12 +743,13 @@ export const programRouter = createTRPCRouter({
       const errorRecovery = new ErrorRecoveryService(ctx.prisma);
 
       try {
-      const result = await assessmentService.cascadeAssessmentUpdates(
+        const result = await assessmentService.cascadeAssessmentUpdates(
         input.programId,
-        input.updates
-      );
+        input.updates,
+        ctx.session.user.id
+        );
 
-      await changeTracker.trackChange(
+        await changeTracker.trackChange(
         'PROGRAM',
         input.programId,
         'ASSESSMENT',
@@ -784,12 +786,13 @@ export const programRouter = createTRPCRouter({
       const errorRecovery = new ErrorRecoveryService(ctx.prisma);
 
       try {
-      const result = await calendarService.cascadeCalendarUpdates(
+        const result = await calendarService.cascadeCalendarUpdates(
         input.programId,
-        input.updates
-      );
+        input.updates,
+        ctx.session.user.id
+        );
 
-      await changeTracker.trackChange(
+        await changeTracker.trackChange(
         'PROGRAM',
         input.programId,
         'CALENDAR',

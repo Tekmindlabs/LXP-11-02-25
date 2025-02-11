@@ -18,7 +18,7 @@ export class TermManagementService {
 		this.notificationService = new NotificationService(db);
 	}
 
-	async cascadeTermUpdates(programId: string, updates: ProgramTermUpdate) {
+	async cascadeTermUpdates(programId: string, updates: ProgramTermUpdate, systemUserId: string) {
 		try {
 			// 1. Update program terms
 			const programTerms = await this.db.programTermStructure.update({
@@ -60,7 +60,9 @@ export class TermManagementService {
 					await this.notificationService.createUpdateNotification(
 						classItem.id,
 						'TERM_UPDATE',
-						{ updatedAt: new Date() }
+						{ updatedAt: new Date() },
+						systemUserId,
+						'Class Term Settings Updated'
 					);
 				}));
 
@@ -68,7 +70,9 @@ export class TermManagementService {
 				await this.notificationService.createUpdateNotification(
 					group.id,
 					'TERM_UPDATE',
-					{ updatedAt: new Date() }
+					{ updatedAt: new Date() },
+					systemUserId,
+					'Class Group Term Settings Updated'
 				);
 			}
 

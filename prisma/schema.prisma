@@ -36,6 +36,7 @@ model User {
 
   // Communication Relations
   sentNotifications     Notification[]            @relation("SentNotifications")
+  targetNotifications   Notification[]            @relation("NotificationTargets")
   receivedNotifications NotificationRecipient[]
   sentMessages          Message[]                 @relation("SentMessages")
   receivedMessages      MessageRecipient[]
@@ -43,6 +44,7 @@ model User {
   messageReactions      MessageReaction[]
   teacherAssignments    TeacherAssignment[]
   progressTracking      ProgressTracking[]
+  changeLogs           ChangeLog[]
 
   // Activity Tracking
   activityLogs ActivityLog[]
@@ -700,18 +702,22 @@ model Classroom {
 
 // Communication Models
 model Notification {
-  id         String                  @id @default(cuid())
-  title      String
-  content    String
-  type       NotificationType
-  sender     User                    @relation("SentNotifications", fields: [senderId], references: [id])
-  senderId   String
-  recipients NotificationRecipient[]
-  entityType String? // e.g., "TIMETABLE", "ASSIGNMENT", "GRADE"
-  entityId   String? // Reference to the entity that triggered the notification
-  metadata   Json? // Additional context about the notification
-  createdAt  DateTime                @default(now())
-  updatedAt  DateTime                @updatedAt
+  id          String                  @id @default(cuid())
+  title       String?
+  content     String?
+  type        String                  // TERM_UPDATE, ASSESSMENT_UPDATE, CALENDAR_UPDATE, ANNOUNCEMENT, ASSIGNMENT, GRADE, REMINDER, SYSTEM
+  sender      User                    @relation("SentNotifications", fields: [senderId], references: [id])
+  senderId    String
+  recipients  NotificationRecipient[]
+  entityType  String?                 // e.g., "TIMETABLE", "ASSIGNMENT", "GRADE", "PROGRAM", "CLASS_GROUP", "CLASS"
+  entityId    String?                 // Reference to the entity that triggered the notification
+  details     String?                 // JSON stringified details
+  status      String                  // UNREAD, READ
+  metadata    Json?                   // Additional context about the notification
+  createdAt   DateTime                @default(now())
+  updatedAt   DateTime                @updatedAt
+  readAt      DateTime?
+  targetUsers User[]                  @relation("NotificationTargets")
 }
 
 model NotificationRecipient {
@@ -1203,17 +1209,8 @@ model BrandKit {
   @@map("brand_kits")
 }
 
-// System Tracking Models
-model Notification {
-  id          String      @id @default(cuid())
-  type        String      // TERM_UPDATE, ASSESSMENT_UPDATE, CALENDAR_UPDATE
-  targetId    String
-  details     String      // JSON stringified details
-  status      String      // UNREAD, READ
-  createdAt   DateTime    @default(now())
-  readAt      DateTime?
-  targetUsers User[]      // Many-to-many relation with users
-}
+
+
 
 model SyncStatus {
   id          String      @id @default(cuid())

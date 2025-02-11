@@ -22,7 +22,7 @@ export class CalendarManagementService {
 		this.notificationService = new NotificationService(db);
 	}
 
-	async cascadeCalendarUpdates(programId: string, updates: CalendarUpdate) {
+	async cascadeCalendarUpdates(programId: string, updates: CalendarUpdate, systemUserId: string) {
 		try {
 			// Update program calendar
 			const programCalendar = await this.db.programCalendar.update({
@@ -52,14 +52,18 @@ export class CalendarManagementService {
 					await this.notificationService.createUpdateNotification(
 						classItem.id,
 						'CALENDAR_UPDATE',
-						{ updatedAt: new Date() }
+						{ updatedAt: new Date() },
+						systemUserId,
+						'Class Calendar Updated'
 					);
 				}));
 
 				await this.notificationService.createUpdateNotification(
 					group.id,
 					'CALENDAR_UPDATE',
-					{ updatedAt: new Date() }
+					{ updatedAt: new Date() },
+					systemUserId,
+					'Class Group Calendar Updated'
 				);
 			}
 

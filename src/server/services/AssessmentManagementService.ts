@@ -14,7 +14,7 @@ export class AssessmentManagementService {
 		this.notificationService = new NotificationService(db);
 	}
 
-	async cascadeAssessmentUpdates(programId: string, updates: AssessmentUpdate) {
+	async cascadeAssessmentUpdates(programId: string, updates: AssessmentUpdate, systemUserId: string) {
 		try {
 			// Update program assessments
 			const programAssessments = await this.db.programAssessmentStructure.update({
@@ -40,7 +40,9 @@ export class AssessmentManagementService {
 					await this.notificationService.createUpdateNotification(
 						classItem.id,
 						'ASSESSMENT_UPDATE',
-						{ updatedAt: new Date() }
+						{ updatedAt: new Date() },
+						systemUserId,
+						'Class Assessment Settings Updated'
 					);
 				}));
 

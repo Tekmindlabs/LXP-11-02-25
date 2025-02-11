@@ -1,11 +1,82 @@
 import { PrismaClient } from "@prisma/client";
 import type { AcademicTerm, ClassGroupTermSettings } from "@/types/terms";
+import { NotificationService } from "./NotificationService";
+
+interface ProgramTermUpdate {
+	academicTerms: {
+		startDate: Date;
+		endDate: Date;
+		name: string;
+	}[];
+	lastUpdated?: Date;
+}
 
 export class TermManagementService {
-	private db: PrismaClient;
+	private notificationService: NotificationService;
 
-	constructor(db: PrismaClient) {
-		this.db = db;
+	constructor(private db: PrismaClient) {
+		this.notificationService = new NotificationService(db);
+	}
+
+	async cascadeTermUpdates(programId: string, updates: ProgramTermUpdate) {
+		try {
+			// 1. Update program terms
+			const programTerms = await this.db.programTermStructure.update({
+				where: { programId },
+				data: updates
+			});
+
+			// 2. Get all related class groups
+			const classGroups = await this.db.classGroup.findMany({
+				where: { programId }
+			});
+
+			// 3. Cascade updates to class groups and their classes
+			for (const group of classGroups) {
+				// Update class group terms
+				await this.db.classGroupTermSettings.update({
+					where: { classGroupId: group.id },
+					data: {
+						academicTerms: updates.academicTerms,
+						lastUpdated: new Date()
+					}
+				});
+
+				// Get and update related classes
+				const classes = await this.db.class.findMany({
+					where: { classGroupId: group.id }
+				});
+
+				await Promise.all(classes.map(async (classItem) => {
+					await this.db.classTermSettings.update({
+						where: { classId: classItem.id },
+						data: {
+							academicTerms: updates.academicTerms,
+							lastUpdated: new Date()
+						}
+					});
+
+					// Create notification for class update
+					await this.notificationService.createUpdateNotification(
+						classItem.id,
+						'TERM_UPDATE',
+						{ updatedAt: new Date() }
+					);
+				}));
+
+				// Create notification for class group update
+				await this.notificationService.createUpdateNotification(
+					group.id,
+					'TERM_UPDATE',
+					{ updatedAt: new Date() }
+				);
+			}
+
+			return programTerms;
+		} catch (error) {
+			console.error('Error in cascadeTermUpdates:', error);
+			throw error;
+		}
 	}
 
 	async createProgramTerms(programId: string, academicYearId: string, terms: Omit<AcademicTerm, 'id'>[]) {

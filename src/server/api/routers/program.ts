@@ -2,6 +2,11 @@ import { z } from "zod";
 import { createTRPCRouter, protectedProcedure } from "../trpc";
 import { TRPCError } from "@trpc/server";
 import { Prisma, Status, TermSystemType } from "@prisma/client";
+import { TermManagementService } from "../../services/TermManagementService";
+import { AssessmentManagementService } from "../../services/AssessmentManagementService";
+import { CalendarManagementService } from "../../services/CalendarManagementService";
+import { ChangeTrackingService } from "../../services/ChangeTrackingService";
+import { ErrorRecoveryService } from "../../services/ErrorRecoveryService";
 
 // Define term system input schema
 const termSystemInput = z.object({
@@ -683,4 +688,121 @@ export const programRouter = createTRPCRouter({
         });
       }
     }),
-});
+
+    updateTerms: protectedProcedure
+    .input(z.object({
+      programId: z.string(),
+      updates: z.object({
+      academicTerms: z.array(z.object({
+        startDate: z.date(),
+        endDate: z.date(),
+        name: z.string()
+      }))
+      })
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const termService = new TermManagementService(ctx.prisma);
+      const changeTracker = new ChangeTrackingService(ctx.prisma);
+      const errorRecovery = new ErrorRecoveryService(ctx.prisma);
+
+      try {
+      const result = await termService.cascadeTermUpdates(
+        input.programId,
+        input.updates
+      );
+
+      await changeTracker.trackChange(
+        'PROGRAM',
+        input.programId,
+        'TERM',
+        input.updates,
+        ctx.session.user.id
+      );
+
+      return result;
+      } catch (error) {
+      if (error instanceof Error) {
+        await errorRecovery.handleFailedSync(input.programId, error);
+      }
+      throw error;
+      }
+    }),
+
+    updateAssessments: protectedProcedure
+    .input(z.object({
+      programId: z.string(),
+      updates: z.object({
+      assessmentStructure: z.any(),
+      gradingSchema: z.any()
+      })
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const assessmentService = new AssessmentManagementService(ctx.prisma);
+      const changeTracker = new ChangeTrackingService(ctx.prisma);
+      const errorRecovery = new ErrorRecoveryService(ctx.prisma);
+
+      try {
+      const result = await assessmentService.cascadeAssessmentUpdates(
+        input.programId,
+        input.updates
+      );
+
+      await changeTracker.trackChange(
+        'PROGRAM',
+        input.programId,
+        'ASSESSMENT',
+        input.updates,
+        ctx.session.user.id
+      );
+
+      return result;
+      } catch (error) {
+      if (error instanceof Error) {
+        await errorRecovery.handleFailedSync(input.programId, error);
+      }
+      throw error;
+      }
+    }),
+
+    updateCalendar: protectedProcedure
+    .input(z.object({
+      programId: z.string(),
+      updates: z.object({
+      events: z.array(z.object({
+        title: z.string(),
+        startDate: z.date(),
+        endDate: z.date(),
+        type: z.string(),
+        details: z.record(z.any())
+      })),
+      scheduleSettings: z.any()
+      })
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const calendarService = new CalendarManagementService(ctx.prisma);
+      const changeTracker = new ChangeTrackingService(ctx.prisma);
+      const errorRecovery = new ErrorRecoveryService(ctx.prisma);
+
+      try {
+      const result = await calendarService.cascadeCalendarUpdates(
+        input.programId,
+        input.updates
+      );
+
+      await changeTracker.trackChange(
+        'PROGRAM',
+        input.programId,
+        'CALENDAR',
+        input.updates,
+        ctx.session.user.id
+      );
+
+      return result;
+      } catch (error) {
+      if (error instanceof Error) {
+        await errorRecovery.handleFailedSync(input.programId, error);
+      }
+      throw error;
+      }
+    })
+  });

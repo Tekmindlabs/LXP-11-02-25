@@ -1203,6 +1203,47 @@ model BrandKit {
   @@map("brand_kits")
 }
 
+// System Tracking Models
+model Notification {
+  id          String      @id @default(cuid())
+  type        String      // TERM_UPDATE, ASSESSMENT_UPDATE, CALENDAR_UPDATE
+  targetId    String
+  details     String      // JSON stringified details
+  status      String      // UNREAD, READ
+  createdAt   DateTime    @default(now())
+  readAt      DateTime?
+  targetUsers User[]      // Many-to-many relation with users
+}
+
+model SyncStatus {
+  id          String      @id @default(cuid())
+  entityId    String      @unique
+  entityType  String      // PROGRAM, CLASS_GROUP, CLASS
+  status      String      // SYNCED, PENDING, FAILED
+  lastSyncAt  DateTime
+  error       String?
+  retryCount  Int         @default(0)
+}
+
+model ChangeLog {
+  id          String      @id @default(cuid())
+  entityType  String      // PROGRAM, CLASS_GROUP, CLASS
+  entityId    String
+  changeType  String      // TERM, ASSESSMENT, CALENDAR
+  changes     String      // JSON stringified changes
+  userId      String
+  user        User        @relation(fields: [userId], references: [id])
+  timestamp   DateTime    @default(now())
+}
+
+model ErrorLog {
+  id            String    @id @default(cuid())
+  entityId      String
+  errorMessage  String
+  stackTrace    String?
+  timestamp     DateTime  @default(now())
+}
+
 // Term Management Models
 model ProgramTermStructure {
   id            String    @id @default(cuid())
